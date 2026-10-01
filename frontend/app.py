@@ -1,40 +1,39 @@
 """
 ===============================================================================
-Project Amica - Milestone v0.1: The Living Core
+Project Amica - Milestone v0.2: Decoupled Flet Desktop Client
 ===============================================================================
-A desktop client built with Flet and Python connecting directly to a local
-Ollama instance running `dolphin-llama3:latest`.
+A desktop client built with Flet and Python serving as the "Face" of
+Project Amica. It connects to the local FastAPI "Brain" service.
 
 Key Architectural Highlights:
-1. Split-Pane Layout:
+1. Split-Pane Layout (Preserved from v0.1):
    - Left Stage (35% width): Visual sprite stage placeholder with dark
-     contrasting theme (#181825 / #000000) and character info.
+     contrasting theme (#181825), character info, and system telemetry.
    - Right Stage (65% width): Interactive chat interface with scrollable history,
      user message bubbles (accented, right-aligned), Ayumi bubbles (dark gray/blue,
      left-aligned), and bottom input row.
-2. Direct Ollama LLM Connection:
-   - REST endpoint: `http://localhost:11434/api/chat`
-   - Hardcoded context window: `num_ctx = 3072` (derived from M3 benchmark)
-   - Personality: Ayumi, the Dragon Sage (witty, sarcastic, tsundere)
-3. Asynchronous Streaming & UI Updates:
-   - Uses `httpx.AsyncClient` with streaming enabled (`stream: True`)
-   - Real-time typewriter effect appending chunks to Markdown control
-   - Input lock/unlock during inference to prevent race conditions
-4. Compatibility:
-   - Supports both `python app.py` and `flet run app.py` across Flet versions.
+2. Decoupled Network Architecture:
+   - Backend Endpoint: `http://127.0.0.1:8000/api/chat/stream`
+   - Relies on FastAPI to communicate with Ollama and enforce generation parameters.
+3. System Prompt & Personality:
+   - Ayumi, the Dragon Sage: "You are Ayumi, the Dragon Sage. You are witty,
+     sharp-tongued, and tsundere-leaning. Keep responses between 2 to 4 sentences.
+     Be punchy, but elaborate when offering comfort or roasting the user's logic."
+4. Asynchronous Streaming:
+   - Uses `httpx.AsyncClient` streaming against the FastAPI backend.
+   - Iterates through `response.aiter_text()` with real-time UI typewriter effect.
+   - Disables input field during active generation to prevent state races.
 ===============================================================================
 """
 
 import asyncio
 import inspect
-import json
 import flet as ft
 import httpx
 
 # =============================================================================
 # CROSS-VERSION STYLING ADAPTERS (Flet 0.x vs Flet 1.x)
 # =============================================================================
-# In Flet 1.0+, styling factories are capitalized classes (Border, BorderRadius, Padding)
 Border = getattr(ft, "Border", None)
 if not Border or not hasattr(Border, "all"):
     Border = getattr(ft, "border", Border)
@@ -52,14 +51,13 @@ ALIGN_CENTER = getattr(ft.Alignment, "CENTER", getattr(ft.alignment, "center", f
 # =============================================================================
 # CONSTANTS & CONFIGURATION
 # =============================================================================
-OLLAMA_CHAT_URL = "http://localhost:11434/api/chat"
-TARGET_MODEL = "dolphin-llama3:latest"
-CONTEXT_WINDOW_SIZE = 3072  # Hardcoded based on empirical M3 MacBook Pro 8GB benchmarks
+BACKEND_STREAM_URL = "http://127.0.0.1:8000/api/chat/stream"
 
+# Specified v0.2 System Prompt
 SYSTEM_PROMPT = (
-    "You are Ayumi, the Dragon Sage. You are a witty, sharp-tongued, and "
-    "tsundere-leaning companion. You speak casually, with dry sarcasm and teasing "
-    "insults, but you secretly care. Keep responses concise."
+    "You are Ayumi, the Dragon Sage. You are witty, sharp-tongued, and "
+    "tsundere-leaning. Keep responses between 2 to 4 sentences. "
+    "Be punchy, but elaborate when offering comfort or roasting the user's logic."
 )
 
 # Catppuccin Mocha / Dark Minimal Palette
@@ -81,13 +79,14 @@ COLOR_ONLINE_GREEN = "#a6e3a1"  # Status green
 # =============================================================================
 async def main(page: ft.Page):
     """
-    Main Flet application entrypoint. Sets up window dimensions, UI stages,
-    message history state, and asynchronous streaming handlers.
+    Main Flet application entrypoint. Sets up the split-pane desktop interface,
+    maintains conversation history with system prompt injection, and manages
+    asynchronous streaming from the FastAPI backend.
     """
     # -------------------------------------------------------------------------
     # 1. Window & Page Settings
     # -------------------------------------------------------------------------
-    page.title = "Project Amica - The Living Core (v0.1)"
+    page.title = "Project Amica - The Living Core (v0.2 Decoupled)"
     page.theme_mode = ft.ThemeMode.DARK
     page.bgcolor = COLOR_BG_PAGE
     page.padding = 0
@@ -114,20 +113,20 @@ async def main(page: ft.Page):
         page.update_async = _update_async_shim
 
     async def focus_control(ctrl):
+        """Safely awaits control focus across sync and async Flet versions."""
         if hasattr(ctrl, "focus"):
             res = ctrl.focus()
             if inspect.isawaitable(res):
                 await res
 
     # -------------------------------------------------------------------------
-    # 2. Conversation State
+    # 2. Conversation State Management
     # -------------------------------------------------------------------------
-    # Full message history sent to Ollama on each turn
+    # System prompt is prepended at the root of the history list
     message_history = [
         {"role": "system", "content": SYSTEM_PROMPT}
     ]
 
-    # Flag to prevent multiple concurrent generations
     is_generating = False
 
     # -------------------------------------------------------------------------
@@ -234,9 +233,9 @@ async def main(page: ft.Page):
                         ),
                     ],
                 ),
-                # The Centered Placeholder Box
+                # Centered Sprite Stage Placeholder
                 sprite_stage_card,
-                # Hardware & Runtime Telemetry Card
+                # Decoupled Architecture Telemetry Card
                 ft.Container(
                     bgcolor="#11111B",
                     border=Border.all(1, COLOR_BORDER),
@@ -246,7 +245,7 @@ async def main(page: ft.Page):
                         spacing=4,
                         controls=[
                             ft.Text(
-                                "M3 RUNTIME PROFILE",
+                                "SYSTEM ARCHITECTURE (v0.2)",
                                 size=10,
                                 weight=ft.FontWeight.BOLD,
                                 color=COLOR_TEXT_MUTED,
@@ -254,22 +253,29 @@ async def main(page: ft.Page):
                             ft.Row(
                                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                                 controls=[
+                                    ft.Text("Backend:", size=11, color=COLOR_TEXT_MUTED),
+                                    ft.Text("FastAPI (8000)", size=11, color=COLOR_TEXT_PRIMARY, weight=ft.FontWeight.W_600),
+                                ],
+                            ),
+                            ft.Row(
+                                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                                controls=[
                                     ft.Text("Model:", size=11, color=COLOR_TEXT_MUTED),
-                                    ft.Text(TARGET_MODEL, size=11, color=COLOR_TEXT_PRIMARY, weight=ft.FontWeight.W_600),
+                                    ft.Text("dolphin-llama3", size=11, color=COLOR_TEXT_PRIMARY, weight=ft.FontWeight.W_600),
                                 ],
                             ),
                             ft.Row(
                                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                                 controls=[
-                                    ft.Text("Context:", size=11, color=COLOR_TEXT_MUTED),
-                                    ft.Text(f"{CONTEXT_WINDOW_SIZE} tokens", size=11, color=COLOR_TEXT_PRIMARY, weight=ft.FontWeight.W_600),
+                                    ft.Text("Context / Predict:", size=11, color=COLOR_TEXT_MUTED),
+                                    ft.Text("3072 / 200 ctx", size=11, color=COLOR_TEXT_PRIMARY, weight=ft.FontWeight.W_600),
                                 ],
                             ),
                             ft.Row(
                                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                                 controls=[
-                                    ft.Text("Mode:", size=11, color=COLOR_TEXT_MUTED),
-                                    ft.Text("Async Streaming", size=11, color=COLOR_ONLINE_GREEN, weight=ft.FontWeight.W_600),
+                                    ft.Text("Stream Channel:", size=11, color=COLOR_TEXT_MUTED),
+                                    ft.Text("HTTP Streaming", size=11, color=COLOR_ONLINE_GREEN, weight=ft.FontWeight.W_600),
                                 ],
                             ),
                         ],
@@ -282,7 +288,6 @@ async def main(page: ft.Page):
     # -------------------------------------------------------------------------
     # 4. Right Stage (65% Width): Chat Interface
     # -------------------------------------------------------------------------
-    # Scrollable list for all messages
     chat_list = ft.ListView(
         expand=True,
         spacing=16,
@@ -290,7 +295,6 @@ async def main(page: ft.Page):
         auto_scroll=True,
     )
 
-    # Input controls
     text_input = ft.TextField(
         expand=True,
         hint_text="Speak with Ayumi... (Press Enter to send)",
@@ -359,7 +363,7 @@ async def main(page: ft.Page):
     def create_ayumi_bubble() -> tuple[ft.Control, ft.Markdown]:
         """
         Constructs a dark gray/blue, left-aligned bubble for Ayumi's response.
-        Returns the container row and the Markdown control to be updated during streaming.
+        Returns the container row and the Markdown control to update during streaming.
         """
         markdown_control = ft.Markdown(
             value="",
@@ -415,108 +419,97 @@ async def main(page: ft.Page):
         return bubble_row, markdown_control
 
     # -------------------------------------------------------------------------
-    # 6. Asynchronous LLM Streaming Engine
+    # 6. Asynchronous Streaming Engine via FastAPI Backend
     # -------------------------------------------------------------------------
     async def send_message(_=None):
         """
-        Handles sending the user query to the local Ollama instance and
-        asynchronously streams response tokens directly to the Flet UI.
+        Submits the conversation history to the FastAPI backend service
+        and asynchronously streams incoming tokens into the chat interface.
         """
         nonlocal is_generating
         user_text = text_input.value.strip()
 
-        # Disallow sending while generation is active or if input is empty
+        # Prevent sending empty text or concurrent requests
         if not user_text or is_generating:
             return
 
         is_generating = True
 
-        # 1. Update UI: clear input, show progress, lock input controls
+        # 1. Update UI: lock inputs and show activity indicator
         text_input.value = ""
         text_input.disabled = True
         send_button.disabled = True
         progress_indicator.visible = True
 
-        # 2. Append User Message to UI & state
+        # 2. Append user message to UI and history state
         chat_list.controls.append(create_user_bubble(user_text))
         message_history.append({"role": "user", "content": user_text})
 
-        # 3. Create Ayumi placeholder bubble in UI
+        # 3. Create placeholder bubble for Ayumi
         ayumi_bubble, markdown_control = create_ayumi_bubble()
         chat_list.controls.append(ayumi_bubble)
         await page.update_async()
 
-        # 4. Stream response tokens from Ollama
+        # 4. Ensure system prompt is explicitly prepended at index 0
+        outgoing_messages = list(message_history)
+        if not outgoing_messages or outgoing_messages[0].get("role") != "system":
+            outgoing_messages.insert(0, {"role": "system", "content": SYSTEM_PROMPT})
+        else:
+            outgoing_messages[0] = {"role": "system", "content": SYSTEM_PROMPT}
+
         accumulated_response = ""
-        payload = {
-            "model": TARGET_MODEL,
-            "messages": message_history,
-            "stream": True,
-            "options": {
-                "num_ctx": CONTEXT_WINDOW_SIZE,
-            },
+        request_payload = {
+            "messages": outgoing_messages
         }
 
         try:
-            # Connect via asynchronous HTTP streaming
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            # Query decoupled FastAPI backend
+            async with httpx.AsyncClient(timeout=120.0) as client:
                 async with client.stream(
                     "POST",
-                    OLLAMA_CHAT_URL,
-                    json=payload,
+                    BACKEND_STREAM_URL,
+                    json=request_payload,
                 ) as response:
-                    # Validate HTTP status
+                    # Validate HTTP status from backend
                     if response.status_code != 200:
                         error_text = await response.aread()
                         accumulated_response = (
-                            f"*[Ayumi raises an eyebrow: Ollama error {response.status_code} - "
+                            f"*[Ayumi narrows her eyes: Backend service error ({response.status_code}) - "
                             f"{error_text.decode('utf-8', errors='ignore')}]*"
                         )
                         markdown_control.value = accumulated_response
                         await page.update_async()
                     else:
-                        # Iterate through newline-delimited JSON chunks
-                        async for raw_line in response.aiter_lines():
-                            line = raw_line.strip()
-                            if not line:
-                                continue
+                        # Iterate through raw text token chunks
+                        async for chunk in response.aiter_text():
+                            if chunk:
+                                accumulated_response += chunk
+                                markdown_control.value = accumulated_response
+                                # Real-time typewriter UI refresh
+                                await page.update_async()
 
-                            try:
-                                chunk_data = json.loads(line)
-                                token = chunk_data.get("message", {}).get("content", "")
-                                if token:
-                                    accumulated_response += token
-                                    markdown_control.value = accumulated_response
-                                    # Real-time UI refresh (typewriter effect)
-                                    await page.update_async()
-
-                                if chunk_data.get("done", False):
-                                    break
-                            except json.JSONDecodeError:
-                                continue
-
-            # 5. Record final assistant response in history
+            # Record final response in client history
             if accumulated_response:
                 message_history.append({"role": "assistant", "content": accumulated_response})
             else:
-                markdown_control.value = "*[Ayumi stays silent, crossing her arms.]*"
+                markdown_control.value = "*[Ayumi scoffs quietly, offering no reply.]*"
                 await page.update_async()
 
         except httpx.ConnectError:
             err_msg = (
-                "*[Connection Error: Could not reach Ollama at http://localhost:11434. "
-                "Ensure Ollama is running and has dolphin-llama3:latest installed.]*"
+                "*[Connection Error: Could not connect to Project Amica backend at http://127.0.0.1:8000. "
+                "Ensure the FastAPI service is running via `python run.py`.]*"
             )
             markdown_control.value = err_msg
             await page.update_async()
 
         except Exception as exc:
-            err_msg = f"*[Unexpected Error: {str(exc)}]*"
+            err_msg = f"*[Unexpected Client Error: {str(exc)}]*"
             markdown_control.value = err_msg
             await page.update_async()
 
         finally:
-            # 6. Restore UI input state
+            # Restore interactive UI controls
             is_generating = False
             text_input.disabled = False
             send_button.disabled = False
@@ -524,22 +517,21 @@ async def main(page: ft.Page):
             await page.update_async()
             await focus_control(text_input)
 
-    # Wire up input trigger events
+    # Wire up input triggers
     text_input.on_submit = send_message
     send_button.on_click = send_message
 
-    # Clear chat callback
+    # Reset conversation callback
     async def clear_chat(_):
         if is_generating:
             return
         chat_list.controls.clear()
         message_history.clear()
         message_history.append({"role": "system", "content": SYSTEM_PROMPT})
-        # Add friendly greeting
+        
         greeting_bubble, greeting_md = create_ayumi_bubble()
         greeting_md.value = (
-            "Well, what do you want? Don't just stand there looking lost. "
-            "I'm listening, so make it quick."
+            "Reset already? Fine by me. Just don't waste my time with boring questions."
         )
         chat_list.controls.append(greeting_bubble)
         message_history.append({"role": "assistant", "content": greeting_md.value})
@@ -548,8 +540,8 @@ async def main(page: ft.Page):
     # Initial Welcome message from Ayumi
     initial_bubble, initial_md = create_ayumi_bubble()
     initial_md.value = (
-        "Hmph. You actually managed to boot up the system? Color me surprised. "
-        "I'm Ayumi. Ask whatever you need, but don't expect me to hold your hand."
+        "Hmph. You actually got the decoupled architecture online? Not bad for an amateur. "
+        "I'm Ayumi. Ask what you need, but keep it brief—I don't have all day."
     )
     chat_list.controls.append(initial_bubble)
     message_history.append({"role": "assistant", "content": initial_md.value})
@@ -578,7 +570,7 @@ async def main(page: ft.Page):
                                 controls=[
                                     ft.Icon(ft.Icons.CHAT_BUBBLE_OUTLINE_ROUNDED, size=20, color=COLOR_ACCENT_USER),
                                     ft.Text(
-                                        "Live Interaction Channel",
+                                        "Live Interaction Channel (Decoupled)",
                                         size=14,
                                         weight=ft.FontWeight.W_600,
                                         color=COLOR_TEXT_PRIMARY,
@@ -643,9 +635,7 @@ async def main(page: ft.Page):
 # =============================================================================
 # ENTRY POINT
 # =============================================================================
-# Ensure compatibility with `python app.py` and `flet run app.py` across Flet versions.
 if not hasattr(ft, "app") and hasattr(ft, "run"):
-    # Alias ft.app to ft.run for legacy CLI runners
     ft.app = ft.run
 
 if __name__ == "__main__":
