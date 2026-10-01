@@ -114,10 +114,13 @@ async def main(page: ft.Page):
 
     async def focus_control(ctrl):
         """Safely awaits control focus across sync and async Flet versions."""
-        if hasattr(ctrl, "focus"):
-            res = ctrl.focus()
-            if inspect.isawaitable(res):
-                await res
+        try:
+            if hasattr(ctrl, "focus"):
+                res = ctrl.focus()
+                if inspect.isawaitable(res):
+                    await res
+        except Exception:
+            pass
 
     # -------------------------------------------------------------------------
     # 2. Conversation State Management
@@ -295,15 +298,25 @@ async def main(page: ft.Page):
         auto_scroll=True,
     )
 
+    border_default = ft.OutlineInputBorder(
+        border_radius=12,
+        side=ft.BorderSide(1, COLOR_BORDER),
+    )
+    border_focused = ft.OutlineInputBorder(
+        border_radius=12,
+        side=ft.BorderSide(1, COLOR_ACCENT_USER),
+    )
+
     text_input = ft.TextField(
         expand=True,
         hint_text="Speak with Ayumi... (Press Enter to send)",
         hint_style=ft.TextStyle(color=COLOR_TEXT_MUTED, size=13),
         text_style=ft.TextStyle(color=COLOR_TEXT_PRIMARY, size=14),
         bgcolor=COLOR_BG_CARD,
-        border_color=COLOR_BORDER,
-        focused_border_color=COLOR_ACCENT_USER,
-        border_radius=12,
+        border={
+            ft.ControlState.DEFAULT: border_default,
+            ft.ControlState.FOCUSED: border_focused,
+        },
         content_padding=Padding.symmetric(horizontal=16, vertical=12),
         multiline=False,
         shift_enter=False,
@@ -418,6 +431,16 @@ async def main(page: ft.Page):
         )
         return bubble_row, markdown_control
 
+    async def scroll_to_bottom():
+        """Safely scrolls the chat viewport to the newest message."""
+        try:
+            if hasattr(chat_list, "scroll_to"):
+                res = chat_list.scroll_to(offset=-1, duration=0)
+                if inspect.isawaitable(res):
+                    await res
+        except Exception:
+            pass
+
     # -------------------------------------------------------------------------
     # 6. Asynchronous Streaming Engine via FastAPI Backend
     # -------------------------------------------------------------------------
@@ -449,6 +472,7 @@ async def main(page: ft.Page):
         ayumi_bubble, markdown_control = create_ayumi_bubble()
         chat_list.controls.append(ayumi_bubble)
         await page.update_async()
+        await scroll_to_bottom()
 
         # 4. Ensure system prompt is explicitly prepended at index 0
         outgoing_messages = list(message_history)
@@ -461,6 +485,7 @@ async def main(page: ft.Page):
         request_payload = {
             "messages": outgoing_messages
         }
+        has_error = False
 
         try:
             # Query decoupled FastAPI backend
@@ -472,6 +497,7 @@ async def main(page: ft.Page):
                 ) as response:
                     # Validate HTTP status from backend
                     if response.status_code != 200:
+                        has_error = True
                         error_text = await response.aread()
                         accumulated_response = (
                             f"*[Ayumi narrows her eyes: Backend service error ({response.status_code}) - "
@@ -479,21 +505,28 @@ async def main(page: ft.Page):
                         )
                         markdown_control.value = accumulated_response
                         await page.update_async()
+                        await scroll_to_bottom()
                     else:
                         # Iterate through raw text token chunks
                         async for chunk in response.aiter_text():
                             if chunk:
                                 accumulated_response += chunk
                                 markdown_control.value = accumulated_response
-                                # Real-time typewriter UI refresh
+                                # Real-time typewriter UI refresh and auto-scroll
                                 await page.update_async()
+                                await scroll_to_bottom()
 
-            # Record final response in client history
-            if accumulated_response:
+                        # Check if backend relayed an internal Ollama/connection error
+                        if accumulated_response.startswith("[Backend Error:") or accumulated_response.startswith("[Ollama Error:"):
+                            has_error = True
+
+            # Record final valid response in client history (skip recording errors)
+            if accumulated_response and not has_error:
                 message_history.append({"role": "assistant", "content": accumulated_response})
-            else:
+            elif not accumulated_response and not has_error:
                 markdown_control.value = "*[Ayumi scoffs quietly, offering no reply.]*"
                 await page.update_async()
+                await scroll_to_bottom()
 
         except httpx.ConnectError:
             err_msg = (
@@ -501,12 +534,18 @@ async def main(page: ft.Page):
                 "Ensure the FastAPI service is running via `python run.py`.]*"
             )
             markdown_control.value = err_msg
+            if message_history and message_history[-1].get("role") == "user":
+                message_history.pop()
             await page.update_async()
+            await scroll_to_bottom()
 
         except Exception as exc:
             err_msg = f"*[Unexpected Client Error: {str(exc)}]*"
             markdown_control.value = err_msg
+            if message_history and message_history[-1].get("role") == "user":
+                message_history.pop()
             await page.update_async()
+            await scroll_to_bottom()
 
         finally:
             # Restore interactive UI controls

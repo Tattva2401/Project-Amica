@@ -111,6 +111,12 @@ async def stream_ollama_tokens(messages: List[dict]) -> AsyncGenerator[str, None
 
                     try:
                         chunk_data = json.loads(line)
+                        if "error" in chunk_data:
+                            error_msg = f"[Ollama Error: {chunk_data['error']}]"
+                            logger.error("Ollama streaming error: %s", error_msg)
+                            yield error_msg
+                            return
+
                         token = chunk_data.get("message", {}).get("content", "")
                         if token:
                             yield token
@@ -121,6 +127,9 @@ async def stream_ollama_tokens(messages: List[dict]) -> AsyncGenerator[str, None
                     except json.JSONDecodeError:
                         continue
 
+    except asyncio.CancelledError:
+        logger.info("Client connection closed before stream finished.")
+        raise
     except httpx.ConnectError:
         error_msg = (
             "[Backend Error: Could not connect to local Ollama at http://localhost:11434. "

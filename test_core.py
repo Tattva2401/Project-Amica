@@ -11,10 +11,11 @@ import asyncio
 import json
 import httpx
 import flet as ft
-from app import OLLAMA_CHAT_URL, TARGET_MODEL, CONTEXT_WINDOW_SIZE, SYSTEM_PROMPT, main
+from backend.main import OLLAMA_API_URL, TARGET_MODEL, NUM_CTX
+from frontend.app import SYSTEM_PROMPT, main
 
 async def test_ollama_streaming():
-    print(">>> [1/2] Testing Ollama API Streaming Connection...")
+    print(">>> [1/2] Testing Direct Ollama API Streaming Connection...")
     test_messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": "Tell me who you are in one quick sarcastic sentence."}
@@ -24,7 +25,7 @@ async def test_ollama_streaming():
         "messages": test_messages,
         "stream": True,
         "options": {
-            "num_ctx": CONTEXT_WINDOW_SIZE,
+            "num_ctx": NUM_CTX,
         }
     }
     
@@ -32,7 +33,7 @@ async def test_ollama_streaming():
     start_time = asyncio.get_event_loop().time()
     
     async with httpx.AsyncClient(timeout=30.0) as client:
-        async with client.stream("POST", OLLAMA_CHAT_URL, json=payload) as response:
+        async with client.stream("POST", OLLAMA_API_URL, json=payload) as response:
             assert response.status_code == 200, f"Ollama HTTP error: {response.status_code}"
             async for line in response.aiter_lines():
                 if not line.strip():
@@ -52,12 +53,13 @@ async def test_ollama_streaming():
     print(">>> Response verified.")
 
 def test_app_import():
-    print("\n>>> [2/2] Testing app.py layout and component definitions...")
-    import app
-    assert app.CONTEXT_WINDOW_SIZE == 3072
-    assert "Ayumi" in app.SYSTEM_PROMPT
-    assert app.TARGET_MODEL == "dolphin-llama3:latest"
-    print("[OK] app.py configuration parameters verified successfully.")
+    print("\n>>> [2/2] Testing frontend & backend layout and component definitions...")
+    import backend.main as bmain
+    import frontend.app as fapp
+    assert bmain.NUM_CTX == 3072
+    assert "Ayumi" in fapp.SYSTEM_PROMPT
+    assert bmain.TARGET_MODEL == "dolphin-llama3:latest"
+    print("[OK] Configuration parameters verified successfully.")
 
 if __name__ == "__main__":
     test_app_import()

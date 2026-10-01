@@ -44,8 +44,16 @@ def resolve_executable(name: str) -> str | None:
     return None
 
 
+_terminating = False
+
+
 def terminate_processes(signum=None, frame=None):
     """Gracefully terminates all managed background processes."""
+    global _terminating
+    if _terminating:
+        return
+    _terminating = True
+
     print("\n[Project Amica] Shutting down services...")
     for proc in child_processes:
         if proc.poll() is None:
@@ -71,11 +79,14 @@ def terminate_processes(signum=None, frame=None):
     sys.exit(0)
 
 
-def wait_for_backend(timeout_seconds: int = 15) -> bool:
+def wait_for_backend(backend_proc=None, timeout_seconds: int = 15) -> bool:
     """Polls the FastAPI health endpoint until it is ready or times out."""
     print(f"[Project Amica] Awaiting backend health at {BACKEND_HEALTH_URL}...")
     start_time = time.time()
     while time.time() - start_time < timeout_seconds:
+        if backend_proc and backend_proc.poll() is not None:
+            print(f"[Project Amica] Backend exited prematurely with code {backend_proc.returncode}!")
+            return False
         try:
             req = urllib.request.Request(BACKEND_HEALTH_URL, headers={"User-Agent": "AmicaBoot/1.0"})
             with urllib.request.urlopen(req, timeout=1.5) as response:
@@ -117,7 +128,10 @@ def main():
     child_processes.append(backend_proc)
 
     # 2. Wait for Backend Readiness
-    wait_for_backend(timeout_seconds=12)
+    if not wait_for_backend(backend_proc, timeout_seconds=12):
+        print("[Project Amica] Aborting startup due to backend failure.")
+        terminate_processes()
+        return
 
     # 3. Determine Frontend Command
     flet_bin = resolve_executable("flet")
