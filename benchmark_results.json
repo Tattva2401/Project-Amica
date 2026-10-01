@@ -1,0 +1,57 @@
+[
+    {
+        "ctx_size": 2048,
+        "wall_clock_s": 19.60285496711731,
+        "load_duration_s": 3.9187295,
+        "prompt_tps": 145.57362772700952,
+        "gen_tps": 18.23707080727961,
+        "ollama_mem": "4.29 GB",
+        "swap_before": "3046.19M",
+        "swap_after": "2884.19M",
+        "eval_count": 256
+    },
+    {
+        "ctx_size": 3072,
+        "wall_clock_s": 20.894557237625122,
+        "load_duration_s": 4.19395625,
+        "prompt_tps": 165.05253563783674,
+        "gen_tps": 16.81680150872986,
+        "ollama_mem": "4.28 GB",
+        "swap_before": "3033.50M",
+        "swap_after": "3270.31M",
+        "eval_count": 256
+    },
+    {
+        "ctx_size": 4096,
+        "wall_clock_s": 21.165069818496704,
+        "load_duration_s": 4.464377166,
+        "prompt_tps": 146.3520141534054,
+        "gen_tps": 14.816985314905788,
+        "ollama_mem": "4.27 GB",
+        "swap_before": "3297.75M",
+        "swap_after": "3558.62M",
+        "eval_count": 223
+    },
+    {
+        "ctx_size": 6144,
+        "wall_clock_s": 21.505449295043945,
+        "load_duration_s": 4.42392175,
+        "prompt_tps": 140.6255347348182,
+        "gen_tps": 16.604046925112115,
+        "ollama_mem": "4.22 GB",
+        "swap_before": "3702.12M",
+        "swap_after": "3913.25M",
+        "eval_count": 256
+    },
+    {
+        "ctx_size": 8192,
+        "wall_clock_s": 29.490214824676514,
+        "load_duration_s": 4.43374075,
+        "prompt_tps": 134.10322031675656,
+        "gen_tps": 11.018096664258323,
+        "ollama_mem": "4.29 GB",
+        "swap_before": "3905.25M",
+        "swap_after": "3389.88M",
+        "eval_count": 256
+    }
+]
