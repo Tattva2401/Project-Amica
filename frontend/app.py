@@ -1,28 +1,24 @@
 """
 ===============================================================================
-Project Amica - Milestone v0.2: Decoupled Flet Desktop Client
+Project Amica - Milestone v0.3: Data-Driven Desktop Client
 ===============================================================================
 A desktop client built with Flet and Python serving as the "Face" of
 Project Amica. It connects to the local FastAPI "Brain" service.
 
-Key Architectural Highlights:
-1. Split-Pane Layout (Preserved from v0.1):
-   - Left Stage (35% width): Visual sprite stage placeholder with dark
-     contrasting theme (#181825), character info, and system telemetry.
+Key Architectural Highlights for v0.3:
+1. Split-Pane Layout:
+   - Left Stage (35% width): Visual sprite stage placeholder, dynamic persona info,
+     and runtime architecture telemetry.
    - Right Stage (65% width): Interactive chat interface with scrollable history,
-     user message bubbles (accented, right-aligned), Ayumi bubbles (dark gray/blue,
-     left-aligned), and bottom input row.
-2. Decoupled Network Architecture:
-   - Backend Endpoint: `http://127.0.0.1:8000/api/chat/stream`
-   - Relies on FastAPI to communicate with Ollama and enforce generation parameters.
-3. System Prompt & Personality:
-   - Ayumi, the Dragon Sage: "You are Ayumi, the Dragon Sage. You are witty,
-     sharp-tongued, and tsundere-leaning. Keep responses between 2 to 4 sentences.
-     Be punchy, but elaborate when offering comfort or roasting the user's logic."
-4. Asynchronous Streaming:
-   - Uses `httpx.AsyncClient` streaming against the FastAPI backend.
-   - Iterates through `response.aiter_text()` with real-time UI typewriter effect.
-   - Disables input field during active generation to prevent state races.
+     typewriter streaming, and auto-scrolling viewport.
+2. Data-Driven Persona Decoupling:
+   - Frontend stores NO hardcoded system prompts in `message_history`.
+   - Sends strictly user and assistant turns, delegating persona enforcement to the backend.
+   - Dynamically polls `/api/persona` on launch to display the active character name,
+     title, model, and context parameters.
+3. Asynchronous Streaming:
+   - Queries `http://127.0.0.1:8000/api/chat/stream` with httpx.
+   - Renders tokens in real time with auto-scroll and input locking.
 ===============================================================================
 """
 
@@ -52,13 +48,8 @@ ALIGN_CENTER = getattr(ft.Alignment, "CENTER", getattr(ft.alignment, "center", f
 # CONSTANTS & CONFIGURATION
 # =============================================================================
 BACKEND_STREAM_URL = "http://127.0.0.1:8000/api/chat/stream"
-
-# Specified v0.2 System Prompt
-SYSTEM_PROMPT = (
-    "You are Ayumi, the Dragon Sage. You are witty, sharp-tongued, and "
-    "tsundere-leaning. Keep responses between 2 to 4 sentences. "
-    "Be punchy, but elaborate when offering comfort or roasting the user's logic."
-)
+BACKEND_PERSONA_URL = "http://127.0.0.1:8000/api/persona"
+BACKEND_HEALTH_URL = "http://127.0.0.1:8000/health"
 
 # Catppuccin Mocha / Dark Minimal Palette
 COLOR_BG_PAGE = "#11111B"       # Deep dark base
@@ -80,13 +71,13 @@ COLOR_ONLINE_GREEN = "#a6e3a1"  # Status green
 async def main(page: ft.Page):
     """
     Main Flet application entrypoint. Sets up the split-pane desktop interface,
-    maintains conversation history with system prompt injection, and manages
-    asynchronous streaming from the FastAPI backend.
+    queries dynamic persona data from the FastAPI backend, and manages asynchronous
+    streaming.
     """
     # -------------------------------------------------------------------------
     # 1. Window & Page Settings
     # -------------------------------------------------------------------------
-    page.title = "Project Amica - The Living Core (v0.2 Decoupled)"
+    page.title = "Project Amica - Ayumi (v0.3 Data-Driven)"
     page.theme_mode = ft.ThemeMode.DARK
     page.bgcolor = COLOR_BG_PAGE
     page.padding = 0
@@ -123,18 +114,56 @@ async def main(page: ft.Page):
             pass
 
     # -------------------------------------------------------------------------
-    # 2. Conversation State Management
+    # 2. Conversation State Management (v0.3: Zero Hardcoded System Prompts)
     # -------------------------------------------------------------------------
-    # System prompt is prepended at the root of the history list
-    message_history = [
-        {"role": "system", "content": SYSTEM_PROMPT}
-    ]
+    # Message history only stores conversational turns (user / assistant).
+    # The backend injects the declarative persona system prompt on each request.
+    message_history: list[dict[str, str]] = []
 
+    # Dynamic character state (polled from backend)
+    active_persona = {
+        "id": "ayumi",
+        "name": "Ayumi",
+        "model": "dolphin-llama3:latest",
+        "num_ctx": 3072,
+        "num_predict": 200,
+    }
     is_generating = False
 
     # -------------------------------------------------------------------------
-    # 3. Left Stage (35% Width): Visual Sprite Placeholder
+    # 3. Dynamic UI Controls & Left Stage (35% Width)
     # -------------------------------------------------------------------------
+    char_name_text = ft.Text(
+        active_persona["name"].upper(),
+        size=17,
+        weight=ft.FontWeight.W_800,
+        color=COLOR_AYUMI_ACCENT,
+    )
+    char_title_text = ft.Text(
+        "Data-Driven Persona",
+        size=12,
+        weight=ft.FontWeight.W_500,
+        color=COLOR_TEXT_MUTED,
+    )
+    chat_header_text = ft.Text(
+        f"Live Interaction Channel ({active_persona['name']})",
+        size=14,
+        weight=ft.FontWeight.W_600,
+        color=COLOR_TEXT_PRIMARY,
+    )
+    telemetry_model_text = ft.Text(
+        active_persona["model"].split(":")[0],
+        size=11,
+        color=COLOR_TEXT_PRIMARY,
+        weight=ft.FontWeight.W_600,
+    )
+    telemetry_ctx_text = ft.Text(
+        f"{active_persona['num_ctx']} / {active_persona['num_predict']} ctx",
+        size=11,
+        color=COLOR_TEXT_PRIMARY,
+        weight=ft.FontWeight.W_600,
+    )
+
     sprite_stage_card = ft.Container(
         expand=True,
         bgcolor="#11111B",
@@ -187,7 +216,7 @@ async def main(page: ft.Page):
             expand=True,
             spacing=16,
             controls=[
-                # Character Info Header
+                # Dynamic Character Info Header
                 ft.Row(
                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -195,18 +224,8 @@ async def main(page: ft.Page):
                         ft.Column(
                             spacing=2,
                             controls=[
-                                ft.Text(
-                                    "AYUMI",
-                                    size=17,
-                                    weight=ft.FontWeight.W_800,
-                                    color=COLOR_AYUMI_ACCENT,
-                                ),
-                                ft.Text(
-                                    "The Dragon Sage",
-                                    size=12,
-                                    weight=ft.FontWeight.W_500,
-                                    color=COLOR_TEXT_MUTED,
-                                ),
+                                char_name_text,
+                                char_title_text,
                             ],
                         ),
                         # Online Status Badge
@@ -238,7 +257,7 @@ async def main(page: ft.Page):
                 ),
                 # Centered Sprite Stage Placeholder
                 sprite_stage_card,
-                # Decoupled Architecture Telemetry Card
+                # Decoupled Architecture & Persona Telemetry Card
                 ft.Container(
                     bgcolor="#11111B",
                     border=Border.all(1, COLOR_BORDER),
@@ -248,7 +267,7 @@ async def main(page: ft.Page):
                         spacing=4,
                         controls=[
                             ft.Text(
-                                "SYSTEM ARCHITECTURE (v0.2)",
+                                "DATA-DRIVEN PERSONA (v0.3)",
                                 size=10,
                                 weight=ft.FontWeight.BOLD,
                                 color=COLOR_TEXT_MUTED,
@@ -264,21 +283,21 @@ async def main(page: ft.Page):
                                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                                 controls=[
                                     ft.Text("Model:", size=11, color=COLOR_TEXT_MUTED),
-                                    ft.Text("dolphin-llama3", size=11, color=COLOR_TEXT_PRIMARY, weight=ft.FontWeight.W_600),
+                                    telemetry_model_text,
                                 ],
                             ),
                             ft.Row(
                                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                                 controls=[
                                     ft.Text("Context / Predict:", size=11, color=COLOR_TEXT_MUTED),
-                                    ft.Text("3072 / 200 ctx", size=11, color=COLOR_TEXT_PRIMARY, weight=ft.FontWeight.W_600),
+                                    telemetry_ctx_text,
                                 ],
                             ),
                             ft.Row(
                                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                                 controls=[
-                                    ft.Text("Stream Channel:", size=11, color=COLOR_TEXT_MUTED),
-                                    ft.Text("HTTP Streaming", size=11, color=COLOR_ONLINE_GREEN, weight=ft.FontWeight.W_600),
+                                    ft.Text("Config Source:", size=11, color=COLOR_TEXT_MUTED),
+                                    ft.Text("persona.yaml", size=11, color=COLOR_ONLINE_GREEN, weight=ft.FontWeight.W_600),
                                 ],
                             ),
                         ],
@@ -337,7 +356,7 @@ async def main(page: ft.Page):
     )
 
     # -------------------------------------------------------------------------
-    # 5. Helper Functions: Message Bubble Builders
+    # 5. Helper Functions: Message Bubble Builders & Auto-Scroll
     # -------------------------------------------------------------------------
     def create_user_bubble(text: str) -> ft.Control:
         """Constructs an accent-styled, right-aligned bubble for user messages."""
@@ -373,9 +392,9 @@ async def main(page: ft.Page):
             ],
         )
 
-    def create_ayumi_bubble() -> tuple[ft.Control, ft.Markdown]:
+    def create_persona_bubble(persona_name: str = "Ayumi") -> tuple[ft.Control, ft.Markdown]:
         """
-        Constructs a dark gray/blue, left-aligned bubble for Ayumi's response.
+        Constructs a styled, left-aligned bubble for the persona's response.
         Returns the container row and the Markdown control to update during streaming.
         """
         markdown_control = ft.Markdown(
@@ -390,7 +409,7 @@ async def main(page: ft.Page):
             vertical_alignment=ft.CrossAxisAlignment.START,
             spacing=10,
             controls=[
-                # Ayumi Avatar Pip
+                # Persona Avatar Pip
                 ft.Container(
                     width=32,
                     height=32,
@@ -398,7 +417,7 @@ async def main(page: ft.Page):
                     bgcolor=COLOR_AYUMI_ACCENT,
                     alignment=ALIGN_CENTER,
                     content=ft.Text(
-                        "A",
+                        persona_name[0].upper() if persona_name else "A",
                         size=14,
                         weight=ft.FontWeight.BOLD,
                         color="#11111B",
@@ -418,7 +437,7 @@ async def main(page: ft.Page):
                         spacing=4,
                         controls=[
                             ft.Text(
-                                "Ayumi (Dragon Sage)",
+                                persona_name,
                                 size=11,
                                 weight=ft.FontWeight.BOLD,
                                 color=COLOR_AYUMI_ACCENT,
@@ -446,8 +465,8 @@ async def main(page: ft.Page):
     # -------------------------------------------------------------------------
     async def send_message(_=None):
         """
-        Submits the conversation history to the FastAPI backend service
-        and asynchronously streams incoming tokens into the chat interface.
+        Submits conversational turns (user/assistant only) to the FastAPI backend.
+        The backend injects the persona system prompt and streams incoming tokens.
         """
         nonlocal is_generating
         user_text = text_input.value.strip()
@@ -464,26 +483,20 @@ async def main(page: ft.Page):
         send_button.disabled = True
         progress_indicator.visible = True
 
-        # 2. Append user message to UI and history state
+        # 2. Append user message to UI and history state (no system prompt!)
         chat_list.controls.append(create_user_bubble(user_text))
         message_history.append({"role": "user", "content": user_text})
 
-        # 3. Create placeholder bubble for Ayumi
-        ayumi_bubble, markdown_control = create_ayumi_bubble()
-        chat_list.controls.append(ayumi_bubble)
+        # 3. Create placeholder bubble for the persona
+        p_name = active_persona.get("name", "Ayumi")
+        persona_bubble, markdown_control = create_persona_bubble(p_name)
+        chat_list.controls.append(persona_bubble)
         await page.update_async()
         await scroll_to_bottom()
 
-        # 4. Ensure system prompt is explicitly prepended at index 0
-        outgoing_messages = list(message_history)
-        if not outgoing_messages or outgoing_messages[0].get("role") != "system":
-            outgoing_messages.insert(0, {"role": "system", "content": SYSTEM_PROMPT})
-        else:
-            outgoing_messages[0] = {"role": "system", "content": SYSTEM_PROMPT}
-
         accumulated_response = ""
         request_payload = {
-            "messages": outgoing_messages
+            "messages": list(message_history)
         }
         has_error = False
 
@@ -500,7 +513,7 @@ async def main(page: ft.Page):
                         has_error = True
                         error_text = await response.aread()
                         accumulated_response = (
-                            f"*[Ayumi narrows her eyes: Backend service error ({response.status_code}) - "
+                            f"*[{p_name} narrows her eyes: Backend service error ({response.status_code}) - "
                             f"{error_text.decode('utf-8', errors='ignore')}]*"
                         )
                         markdown_control.value = accumulated_response
@@ -516,7 +529,7 @@ async def main(page: ft.Page):
                                 await page.update_async()
                                 await scroll_to_bottom()
 
-                        # Check if backend relayed an internal Ollama/connection error
+                        # Check if backend relayed an internal Ollama error
                         if accumulated_response.startswith("[Backend Error:") or accumulated_response.startswith("[Ollama Error:"):
                             has_error = True
 
@@ -524,7 +537,7 @@ async def main(page: ft.Page):
             if accumulated_response and not has_error:
                 message_history.append({"role": "assistant", "content": accumulated_response})
             elif not accumulated_response and not has_error:
-                markdown_control.value = "*[Ayumi scoffs quietly, offering no reply.]*"
+                markdown_control.value = f"*[{p_name} scoffs quietly, offering no reply.]*"
                 await page.update_async()
                 await scroll_to_bottom()
 
@@ -566,21 +579,21 @@ async def main(page: ft.Page):
             return
         chat_list.controls.clear()
         message_history.clear()
-        message_history.append({"role": "system", "content": SYSTEM_PROMPT})
         
-        greeting_bubble, greeting_md = create_ayumi_bubble()
+        p_name = active_persona.get("name", "Ayumi")
+        greeting_bubble, greeting_md = create_persona_bubble(p_name)
         greeting_md.value = (
-            "Reset already? Fine by me. Just don't waste my time with boring questions."
+            f"Reset already? Fine by me. Just don't waste my time with boring questions."
         )
         chat_list.controls.append(greeting_bubble)
         message_history.append({"role": "assistant", "content": greeting_md.value})
         await page.update_async()
 
-    # Initial Welcome message from Ayumi
-    initial_bubble, initial_md = create_ayumi_bubble()
+    # Initial Welcome message
+    initial_bubble, initial_md = create_persona_bubble(active_persona.get("name", "Ayumi"))
     initial_md.value = (
-        "Hmph. You actually got the decoupled architecture online? Not bad for an amateur. "
-        "I'm Ayumi. Ask what you need, but keep it brief—I don't have all day."
+        f"Hmph. You loaded the data-driven persona configuration? Not bad for an amateur. "
+        f"I'm {active_persona.get('name', 'Ayumi')}. Ask what you need, but keep it brief."
     )
     chat_list.controls.append(initial_bubble)
     message_history.append({"role": "assistant", "content": initial_md.value})
@@ -608,12 +621,7 @@ async def main(page: ft.Page):
                                 spacing=10,
                                 controls=[
                                     ft.Icon(ft.Icons.CHAT_BUBBLE_OUTLINE_ROUNDED, size=20, color=COLOR_ACCENT_USER),
-                                    ft.Text(
-                                        "Live Interaction Channel (Decoupled)",
-                                        size=14,
-                                        weight=ft.FontWeight.W_600,
-                                        color=COLOR_TEXT_PRIMARY,
-                                    ),
+                                    chat_header_text,
                                 ],
                             ),
                             ft.Row(
@@ -669,6 +677,34 @@ async def main(page: ft.Page):
     page.add(main_layout)
     await page.update_async()
     await focus_control(text_input)
+
+    # -------------------------------------------------------------------------
+    # 9. Asynchronously Query Backend Persona Info to Reflect Dynamic Config
+    # -------------------------------------------------------------------------
+    async def sync_persona_metadata():
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                res = await client.get(BACKEND_PERSONA_URL)
+                if res.status_code == 200:
+                    data = res.json()
+                    name = data.get("name", "Ayumi")
+                    model = data.get("model", "dolphin-llama3:latest")
+                    num_ctx = data.get("num_ctx", 3072)
+                    num_predict = data.get("num_predict", 200)
+
+                    active_persona.update(data)
+                    char_name_text.value = name.upper()
+                    chat_header_text.value = f"Live Interaction Channel ({name})"
+                    page.title = f"Project Amica - {name} (v0.3 Data-Driven)"
+                    telemetry_model_text.value = model.split(":")[0]
+                    telemetry_ctx_text.value = f"{num_ctx} / {num_predict} ctx"
+                    text_input.hint_text = f"Speak with {name}... (Press Enter to send)"
+                    await page.update_async()
+        except Exception:
+            # Backend not reachable yet or offline; fallback defaults preserved
+            pass
+
+    asyncio.create_task(sync_persona_metadata())
 
 
 # =============================================================================

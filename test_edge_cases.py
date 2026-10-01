@@ -2,21 +2,21 @@
 Edge Case & Resilience Test Suite for Project Amica.
 Covers:
 1. Backend validation (empty message history, invalid schema).
-2. Error resilience (handling upstream Ollama issues gracefully).
+2. Data-driven persona fallback handling (missing/unreadable persona files).
 3. Frontend UI layout initialization without warnings or errors.
-4. Conversation turn state management.
+4. Conversation turn state management (no frontend hardcoded system prompt).
 """
 
 import asyncio
 import warnings
 import httpx
 import flet as ft
-from backend.main import app, TARGET_MODEL, NUM_CTX
-from frontend.app import main as frontend_main, SYSTEM_PROMPT
+from backend.main import app, PERSONA_CONFIG, SYSTEM_PROMPT, load_persona
+from frontend.app import main as frontend_main
 
 
 async def test_backend_validation():
-    print("\n--- [1/3] Testing Backend Input Validation ---")
+    print("\n--- [1/4] Testing Backend Input Validation ---")
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         # Test 1: Empty message list should fail with 422 or 400
@@ -30,13 +30,22 @@ async def test_backend_validation():
         print(f"[OK] Malformed message rejected: HTTP {resp.status_code}")
 
 
+async def test_persona_fallbacks():
+    print("\n--- [2/4] Testing Persona Fallback Robustness ---")
+    # Test loading a non-existent persona ID - should gracefully fallback to defaults
+    fallback_cfg, fallback_prompt = load_persona("missing_character_xyz")
+    assert fallback_cfg["id"] == "missing_character_xyz"
+    assert "model" in fallback_cfg
+    assert fallback_cfg["num_ctx"] == 3072
+    assert len(fallback_prompt) > 0
+    print(f"[OK] Missing persona handled gracefully: {fallback_cfg['name']} (fallback model: {fallback_cfg['model']})")
+
+
 async def test_frontend_layout_cleanliness():
-    print("\n--- [2/3] Testing Frontend Page Initialization ---")
-    # Verify no DeprecationWarnings or exceptions are raised during page building
+    print("\n--- [3/4] Testing Frontend Page Initialization ---")
     with warnings.catch_warnings(record=True) as captured_warnings:
         warnings.simplefilter("always")
 
-        # Mock a minimal Flet Page
         class MockPage:
             def __init__(self):
                 self.title = ""
@@ -58,7 +67,6 @@ async def test_frontend_layout_cleanliness():
         mock_page = MockPage()
         await frontend_main(mock_page)
 
-        # Check for any DeprecationWarnings
         deprecations = [w for w in captured_warnings if issubclass(w.category, DeprecationWarning)]
         if deprecations:
             print(f"[WARN] Captured {len(deprecations)} deprecation warnings:")
@@ -72,17 +80,18 @@ async def test_frontend_layout_cleanliness():
 
 
 async def test_system_prompt_adherence():
-    print("\n--- [3/3] Testing Conversation State & System Prompt Integrity ---")
+    print("\n--- [4/4] Testing Conversation State & Data-Driven Prompt Integrity ---")
     assert "Ayumi" in SYSTEM_PROMPT
     assert "Dragon Sage" in SYSTEM_PROMPT
-    print("[OK] Character identity and persona defined correctly.")
+    print("[OK] Data-driven character identity and guidelines loaded correctly from system_prompt.md.")
 
 
 async def main():
     print("=" * 60)
-    print("Running Project Amica Automated Resilience & Quality Suite")
+    print("Running Project Amica Automated Resilience & Quality Suite (v0.3)")
     print("=" * 60)
     await test_backend_validation()
+    await test_persona_fallbacks()
     await test_frontend_layout_cleanliness()
     await test_system_prompt_adherence()
     print("\n" + "=" * 60)

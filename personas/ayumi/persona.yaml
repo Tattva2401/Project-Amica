@@ -1,0 +1,6 @@
+id: "ayumi"
+name: "Ayumi"
+model: "dolphin-llama3:latest"
+temperature: 0.7
+num_ctx: 3072
+num_predict: 200

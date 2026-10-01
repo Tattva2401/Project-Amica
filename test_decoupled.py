@@ -1,44 +1,54 @@
 """
-Unit & Integration test for Milestone v0.2 Decoupled Architecture.
+Unit & Integration test for Milestone v0.3 Data-Driven Persona Architecture.
 Tests:
-1. FastAPI /health endpoint.
-2. FastAPI /api/chat/stream endpoint with full Ollama relay.
-3. System prompt adherence and token streaming speed.
+1. Dynamic loading of persona.yaml and system_prompt.md.
+2. FastAPI /health and /api/persona endpoints.
+3. FastAPI /api/chat/stream endpoint with backend system prompt injection and Ollama streaming.
 """
 
 import asyncio
 import httpx
-from backend.main import app, TARGET_MODEL, NUM_CTX, NUM_PREDICT, TEMPERATURE
+from backend.main import app, PERSONA_CONFIG, SYSTEM_PROMPT
 
 async def run_integration_tests():
-    print(">>> [1/3] Testing FastAPI ASGI app initialization...")
-    assert TARGET_MODEL == "dolphin-llama3:latest"
-    assert NUM_CTX == 3072
-    assert NUM_PREDICT == 200
-    assert TEMPERATURE == 0.7
-    print("[OK] Backend configuration constants verified.")
+    print(">>> [1/4] Verifying Dynamic Persona Configuration...")
+    assert PERSONA_CONFIG["id"] == "ayumi"
+    assert PERSONA_CONFIG["name"] == "Ayumi"
+    assert PERSONA_CONFIG["model"] == "dolphin-llama3:latest"
+    assert PERSONA_CONFIG["num_ctx"] == 3072
+    assert PERSONA_CONFIG["num_predict"] == 200
+    assert PERSONA_CONFIG["temperature"] == 0.7
+    assert "Ayumi" in SYSTEM_PROMPT
+    assert "Dragon Sage" in SYSTEM_PROMPT
+    print("[OK] persona.yaml and system_prompt.md parsed and verified.")
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         # 1. Health check
-        print(">>> [2/3] Querying /health...")
+        print(">>> [2/4] Querying /health...")
         health_resp = await client.get("/health")
         assert health_resp.status_code == 200
         health_json = health_resp.json()
         print(f"[OK] Health response: {health_json}")
         assert health_json["status"] == "healthy"
+        assert health_json["persona_name"] == "Ayumi"
 
-        # 2. Chat stream test
-        print(">>> [3/3] Querying /api/chat/stream (Relaying to Ollama)...")
+        # 2. Persona endpoint
+        print(">>> [3/4] Querying /api/persona...")
+        persona_resp = await client.get("/api/persona")
+        assert persona_resp.status_code == 200
+        persona_json = persona_resp.json()
+        print(f"[OK] Persona response: {persona_json}")
+        assert persona_json["id"] == "ayumi"
+        assert persona_json["name"] == "Ayumi"
+
+        # 3. Chat stream test (Client sends pure user turn; backend injects system prompt)
+        print(">>> [4/4] Querying /api/chat/stream (Relaying to Ollama with injected persona)...")
         test_payload = {
             "messages": [
                 {
-                    "role": "system",
-                    "content": "You are Ayumi, the Dragon Sage. You are witty, sharp-tongued, and tsundere-leaning. Keep responses between 2 to 4 sentences."
-                },
-                {
                     "role": "user",
-                    "content": "Are you ready for v0.2?"
+                    "content": "Tell me who you are in one quick sentence."
                 }
             ]
         }
@@ -57,7 +67,7 @@ async def run_integration_tests():
         assert len(full_reply) > 0, "No response tokens received!"
 
     print("\n" + "=" * 60)
-    print("All Milestone v0.2 Backend Integration Tests PASSED!")
+    print("All Milestone v0.3 Backend Integration Tests PASSED!")
     print("=" * 60)
 
 if __name__ == "__main__":

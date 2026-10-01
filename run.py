@@ -110,7 +110,7 @@ def main():
     os.chdir(base_dir)
 
     print("=" * 70)
-    print("Project Amica - Milestone v0.2 Bootstrap")
+    print("Project Amica - Master Boot Script (v0.3)")
     print("=" * 70)
 
     # 1. Determine Backend Command

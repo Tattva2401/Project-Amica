@@ -1,8 +1,8 @@
 """
-Integration test for Project Amica v0.1 Core & Ollama connection.
+Integration test for Project Amica Core & Ollama connection.
 Verifies:
-1. Ollama service availability.
-2. Ayumi system prompt and 3072 context streaming.
+1. Direct Ollama API connectivity using data-driven persona parameters.
+2. Ayumi system prompt and context window validation.
 3. Token accumulation speed and content sanity.
 4. Flet app layout structure initialization.
 """
@@ -11,8 +11,8 @@ import asyncio
 import json
 import httpx
 import flet as ft
-from backend.main import OLLAMA_API_URL, TARGET_MODEL, NUM_CTX
-from frontend.app import SYSTEM_PROMPT, main
+from backend.main import OLLAMA_API_URL, PERSONA_CONFIG, SYSTEM_PROMPT
+from frontend.app import main as frontend_main
 
 async def test_ollama_streaming():
     print(">>> [1/2] Testing Direct Ollama API Streaming Connection...")
@@ -21,11 +21,12 @@ async def test_ollama_streaming():
         {"role": "user", "content": "Tell me who you are in one quick sarcastic sentence."}
     ]
     payload = {
-        "model": TARGET_MODEL,
+        "model": PERSONA_CONFIG.get("model", "dolphin-llama3:latest"),
         "messages": test_messages,
         "stream": True,
         "options": {
-            "num_ctx": NUM_CTX,
+            "num_ctx": PERSONA_CONFIG.get("num_ctx", 3072),
+            "temperature": PERSONA_CONFIG.get("temperature", 0.7),
         }
     }
     
@@ -56,9 +57,9 @@ def test_app_import():
     print("\n>>> [2/2] Testing frontend & backend layout and component definitions...")
     import backend.main as bmain
     import frontend.app as fapp
-    assert bmain.NUM_CTX == 3072
-    assert "Ayumi" in fapp.SYSTEM_PROMPT
-    assert bmain.TARGET_MODEL == "dolphin-llama3:latest"
+    assert bmain.PERSONA_CONFIG["num_ctx"] == 3072
+    assert "Ayumi" in bmain.SYSTEM_PROMPT
+    assert bmain.PERSONA_CONFIG["model"] == "dolphin-llama3:latest"
     print("[OK] Configuration parameters verified successfully.")
 
 if __name__ == "__main__":
